@@ -1,87 +1,117 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/JSP_Servlet/Servlet.java to edit this template
- */
 package servlet;
 
+import dao.EstudiantewebJpaController;
+import dto.Estudianteweb;
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.persistence.EntityManagerFactory;
+import javax.persistence.Persistence;
 import javax.servlet.ServletException;
 import javax.servlet.annotation.WebServlet;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.*;
+import org.json.JSONObject;
 
-/**
- *
- * @author edins
- */
 @WebServlet(name = "LoginServlet", urlPatterns = {"/LoginServlet"})
 public class LoginServlet extends HttpServlet {
 
-    /**
-     * Processes requests for both HTTP <code>GET</code> and <code>POST</code>
-     * methods.
-     *
-     * @param request servlet request
-     * @param response servlet response
-     * @throws ServletException if a servlet-specific error occurs
-     * @throws IOException if an I/O error occurs
-     */
-    protected void processRequest(HttpServletRequest request, HttpServletResponse response)
-            throws ServletException, IOException {
-        response.setContentType("text/html;charset=UTF-8");
-        try (PrintWriter out = response.getWriter()) {
-            /* TODO output your page here. You may use following sample code. */
-            out.println("<!DOCTYPE html>");
-            out.println("<html>");
-            out.println("<head>");
-            out.println("<title>Servlet LoginServlet</title>");            
-            out.println("</head>");
-            out.println("<body>");
-            out.println("<h1>Servlet LoginServlet at " + request.getContextPath() + "</h1>");
-            out.println("</body>");
-            out.println("</html>");
+    private EstudiantewebJpaController controller;
+
+    @Override
+    public void init() throws ServletException {
+        EntityManagerFactory emf = Persistence.createEntityManagerFactory("com.mycompany_preg01_war_1.0-SNAPSHOTPU");
+        controller = new EstudiantewebJpaController(emf);
+    }
+
+    // Buscar estudiante por código y responder JSON
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("UTF-8");
+        resp.setCharacterEncoding("UTF-8");
+        resp.setContentType("application/json;charset=UTF-8");
+
+        try {
+            int cod = Integer.parseInt(req.getParameter("codigo"));
+            Estudianteweb est = controller.findEstudianteweb(cod);
+
+            JSONObject obj = new JSONObject();
+            if (est != null) {
+                obj.put("codigo", est.getCodiEstdWeb());
+                obj.put("dni", est.getNdniEstdWeb());
+                obj.put("apellidoPaterno", est.getAppEstdWeb());
+                obj.put("apellidoMaterno", est.getApmaEstWeb());
+                obj.put("nombre", est.getNombEstdWeb());
+                obj.put("login", est.getLogiEstd());
+            } else {
+                obj.put("error", "Estudiante no encontrado");
+                resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            }
+
+            resp.getWriter().print(obj.toString());
+
+        } catch (NumberFormatException e) {
+            resp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            resp.getWriter().print("{\"error\": \"Código inválido\"}");
         }
     }
 
-    // <editor-fold defaultstate="collapsed" desc="HttpServlet methods. Click on the + sign on the left to edit the code.">
-    /**
-     * Handles the HTTP <code>GET</code> method.
-     *
-     * @param request servlet request
-     * @param response servlet response
-     * @throws ServletException if a servlet-specific error occurs
-     * @throws IOException if an I/O error occurs
-     */
-    @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response)
-            throws ServletException, IOException {
-        processRequest(request, response);
-    }
-
-    /**
-     * Handles the HTTP <code>POST</code> method.
-     *
-     * @param request servlet request
-     * @param response servlet response
-     * @throws ServletException if a servlet-specific error occurs
-     * @throws IOException if an I/O error occurs
-     */
+    // Validar login
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        processRequest(request, response);
+
+        String login = request.getParameter("login");
+        String password = request.getParameter("password");
+
+        List<Estudianteweb> estudiantes = controller.findEstudiantewebEntities();
+
+        for (Estudianteweb e : estudiantes) {
+            if (e.getLogiEstd().equals(login) && e.getPassEstd().equals(password)) {
+                HttpSession session = request.getSession();
+                session.setAttribute("usuario", e);
+                response.sendRedirect("index.html");
+                return;
+            }
+        }
+
+        response.sendRedirect("login.html?error=invalid");
     }
 
-    /**
-     * Returns a short description of the servlet.
-     *
-     * @return a String containing servlet description
-     */
+    // Actualizar contraseña (por JSON)
     @Override
-    public String getServletInfo() {
-        return "Short description";
-    }// </editor-fold>
+    protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        req.setCharacterEncoding("UTF-8");
+        resp.setCharacterEncoding("UTF-8");
 
+        BufferedReader reader = req.getReader();
+        StringBuilder jsonB = new StringBuilder();
+        String linea;
+        while ((linea = reader.readLine()) != null) {
+            jsonB.append(linea);
+        }
+
+        JSONObject jsonObject = new JSONObject(jsonB.toString());
+
+        try {
+            int cod = jsonObject.getInt("codigo");
+            String nuevaPass = jsonObject.getString("nuevaContrasena");
+
+            Estudianteweb est = controller.findEstudianteweb(cod);
+            if (est != null) {
+                est.setPassEstd(nuevaPass);
+                controller.edit(est);
+                resp.getWriter().print("{\"mensaje\": \"Contraseña actualizada\"}");
+            } else {
+                resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                resp.getWriter().print("{\"error\": \"Estudiante no encontrado\"}");
+            }
+
+        } catch (Exception e) {
+            Logger.getLogger(LoginServlet.class.getName()).log(Level.SEVERE, null, e);
+            resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            resp.getWriter().print("{\"error\": \"Error interno\"}");
+        }
+    }
 }
